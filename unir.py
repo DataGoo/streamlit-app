@@ -1,6 +1,7 @@
 import streamlit as st
-import xlwings as xw
 import pandas as pd
+import openpyxl
+from openpyxl.styles import PatternFill
 import tempfile
 import shutil
 
@@ -18,38 +19,49 @@ def compare_excel_files(file1, file2):
     path2 = save_uploaded_file(file2)
 
     if path1 and path2:
-        # Cargar los archivos de Excel
-        wb1 = xw.Book(path1)
-        wb2 = xw.Book(path2)
-        
-        sht1 = wb1.sheets[0]
-        sht2 = wb2.sheets[0]
-        
-        # Convertir las hojas a DataFrames
-        df1 = sht1.range('A1').options(pd.DataFrame, expand='table').value
-        df2 = sht2.range('A1').options(pd.DataFrame, expand='table').value
-        
-        # Validación de índices
-        if not df1.columns.equals(df2.columns):
-            wb1.close()
-            wb2.close()
-            st.error("Los índices de las columnas no coinciden en ambos archivos.")
+        df1 = pd.read_excel(path1, engine='openpyxl')
+        df2 = pd.read_excel(path2, engine='openpyxl')
+
+        # Verificar que las columnas y las filas coincidan
+        if not (df1.shape == df2.shape and df1.columns.equals(df2.columns)):
+            st.error("Las dimensiones o los índices de las columnas no coinciden en ambos archivos.")
             return None, None
 
-        # Encontrar las diferencias
-        diff = df1.compare(df2)
-        
-        # Guardar las diferencias en un nuevo archivo de Excel
-        wb_diff = xw.Book()
-        sht_diff = wb_diff.sheets[0]
-        sht_diff.range('A1').value = diff
-        wb_diff.save('differences.xlsx')
-        wb_diff.close()
+        # Crear un libro de Excel para las diferencias
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
 
-        wb1.close()
-        wb2.close()
-        
-        return 'differences.xlsx', diff
+        # Copiar el encabezado
+        for col_num, value in enumerate(df1.columns, 1):
+            ws.cell(row=1, column=col_num, value=value)
+
+        row_offset = 2  # Row offset in the Excel file to start adding data rows
+        any_difference = False
+        # Comparar celda por celda
+        for row in range(df1.shape[0]):
+            differences_in_row = []
+            for col in range(df1.shape[1]):
+                original_value = df1.iat[row, col]
+                new_value = df2.iat[row, col]
+                if original_value != new_value:
+                    cell = ws.cell(row=row_offset, column=col+1, value=new_value)
+                    cell.fill = fill
+                    differences_in_row.append(col+1)
+                else:
+                    ws.cell(row=row_offset, column=col+1, value=original_value)
+
+            if differences_in_row:  # Only if there are differences
+                any_difference = True
+                row_offset += 1  # Prepare offset for the next row with differences
+
+        if any_difference:
+            diff_file_path = 'differences.xlsx'
+            wb.save(diff_file_path)
+            return diff_file_path, pd.read_excel(diff_file_path)
+        else:
+            st.info('No se encontraron diferencias.')
+            return None, None
     else:
         return None, None
 
